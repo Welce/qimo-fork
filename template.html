@@ -109,6 +109,91 @@
             }
         }
 
+        /* 手动主题切换：仅在用户选择后覆盖系统自动识别（默认不启用） */
+        :root[data-theme="dark"] {
+            color-scheme: dark;
+
+            --bg-body: #0f1115;
+            --bg-card: #161a22;
+            --bg-block: #12161d;
+
+            --text-main: #e8e8e8;
+            --text-sub: rgba(232, 232, 232, 0.70);
+            --text-accent: #9bb3cc;
+
+            --border-light: rgba(255, 255, 255, 0.10);
+
+            --code-bg: var(--bg-block);
+            --code-border: rgba(255, 255, 255, 0.14);
+            --code-demicode: #7fd0ff;
+            --code-orange: #f3b06b;
+            --code-blue: #8fd4ff;
+            --code-purple: #d2a0ff;
+
+            --bar-bg: rgba(22, 26, 34, 0.85);
+            --bar-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+            --bar-border: rgba(255, 255, 255, 0.10);
+            --bar-progress-strength: 22%;
+            --bar-progress-fallback-alpha: 0.16;
+
+            --ball-bg: rgba(22, 26, 34, 0.78);
+            --ball-border: rgba(255, 255, 255, 0.10);
+            --ball-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+            --ball-shadow-docked: 0 10px 26px rgba(0, 0, 0, 0.55);
+            --ball-shadow-dragging: 0 14px 34px rgba(0, 0, 0, 0.65);
+
+            --toast-bg: rgba(22, 26, 34, 0.92);
+            --toast-border: rgba(255, 255, 255, 0.10);
+            --toast-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+
+            --modal-overlay-bg: rgba(0, 0, 0, 0.52);
+            --modal-shadow: 0 18px 55px rgba(0, 0, 0, 0.55);
+            --modal-link-underline: rgba(155, 179, 204, 0.55);
+            --modal-muted: rgba(232, 232, 232, 0.72);
+        }
+
+        :root[data-theme="light"] {
+            color-scheme: light;
+
+            --bg-body: #f9f8f6;
+            --bg-card: #ffffff;
+            --bg-block: #f4f4f2;
+
+            --text-main: #333333;
+            --text-sub: #888888;
+            --text-accent: #5e7087;
+
+            --border-light: #f0f0f0;
+
+            --code-bg: #ffffff;
+            --code-border: #e0e0e0;
+            --code-demicode: #15658f;
+            --code-orange: rgb(151, 80, 13);
+            --code-blue: rgb(8, 56, 93);
+            --code-purple: rgb(112, 31, 146);
+
+            --bar-bg: rgba(255, 255, 255, 0.85);
+            --bar-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+            --bar-border: transparent;
+            --bar-progress-strength: 16%;
+            --bar-progress-fallback-alpha: 0.10;
+
+            --ball-bg: rgba(255, 255, 255, 0.78);
+            --ball-border: rgba(0, 0, 0, 0.06);
+            --ball-shadow: 0 10px 26px rgba(0, 0, 0, 0.12);
+            --ball-shadow-docked: 0 8px 20px rgba(0, 0, 0, 0.10);
+            --ball-shadow-dragging: 0 14px 34px rgba(0, 0, 0, 0.16);
+
+            --toast-bg: rgba(255, 255, 255, 0.92);
+            --toast-border: var(--border-light);
+            --toast-shadow: 0 10px 30px rgba(0, 0, 0, 0.10);
+
+            --modal-overlay-bg: rgba(10, 10, 10, 0.18);
+            --modal-shadow: 0 18px 55px rgba(0, 0, 0, 0.12);
+            --modal-link-underline: rgba(94, 112, 135, 0.55);
+            --modal-muted: rgba(51, 51, 51, 0.70);
+        }
+
         * {
             box-sizing: border-box;
             margin: 0;
@@ -895,7 +980,8 @@
             .control-bar.is-hidden {
                 opacity: 1;
                 transform: none;
-                pointer-events: none;
+                /* 允许在“进度条态”长按拖动调节阅读进度 */
+                pointer-events: auto;
                 padding: 0;
                 height: 6px;
                 max-height: 6px;
@@ -960,6 +1046,8 @@
         <button class="control-btn" id="fontDecrease" title="减小字号">A-</button>
         <span class="font-display" id="fontDisplay">15</span>
         <button class="control-btn" id="fontIncrease" title="增大字号">A+</button>
+        <button class="control-btn" id="toggleTheme" title="切换深浅色" type="button" aria-label="切换深浅色"
+            aria-pressed="false">自</button>
         <button class="control-btn" id="toggleFloatBall" title="启用/禁用小球" type="button" aria-label="启用或禁用小球"
             aria-pressed="true">球</button>
     </div>
@@ -1146,6 +1234,118 @@
 
             // 默认显示
             showBar();
+
+            /* 移动端：长按底栏并左右拖动，调节阅读进度 */
+            (function setupBarScrub() {
+                const HOLD_MS = 240;
+                const MOVE_CANCEL_PX = 10;
+
+                let pressTimer = null;
+                let activePointerId = null;
+                let scrubbing = false;
+                let startX = 0;
+                let startY = 0;
+                let movedTooMuch = false;
+
+                const clearPressTimer = () => {
+                    if (pressTimer) window.clearTimeout(pressTimer);
+                    pressTimer = null;
+                };
+
+                const clamp01 = (n) => Math.min(1, Math.max(0, n));
+
+                const isBlockedTarget = (target) => {
+                    if (!target || !target.closest) return false;
+                    // 不抢按钮/字号显示的交互
+                    return Boolean(target.closest('.control-btn, #fontDisplay'));
+                };
+
+                const scrollToProgress = (clientX) => {
+                    const rect = bar.getBoundingClientRect();
+                    if (!rect || rect.width <= 1) return;
+                    const x = clientX - rect.left;
+                    const p = clamp01(x / rect.width);
+
+                    const docEl = document.documentElement;
+                    const clientH = window.innerHeight || docEl.clientHeight || 0;
+                    const denom = Math.max(1, (docEl.scrollHeight || 0) - clientH);
+                    const y = Math.round(p * denom);
+                    window.scrollTo(0, y);
+
+                    if (typeof window.__veUpdateReadProgress === 'function') {
+                        window.__veUpdateReadProgress();
+                    }
+                };
+
+                const onPointerDown = (e) => {
+                    if (!mq.matches) return;
+                    if (typeof isOpen === 'function' && isOpen()) return;
+                    if (!e || e.pointerId == null) return;
+                    if (activePointerId != null) return;
+                    if (isBlockedTarget(e.target)) return;
+
+                    activePointerId = e.pointerId;
+                    scrubbing = false;
+                    movedTooMuch = false;
+                    startX = e.clientX;
+                    startY = e.clientY;
+
+                    clearPressTimer();
+                    pressTimer = window.setTimeout(() => {
+                        // 如果用户在长按期间明显滑动了，就不进入 scrub（避免影响正常滚动）
+                        if (movedTooMuch) return;
+                        scrubbing = true;
+                        try {
+                            bar.setPointerCapture(activePointerId);
+                        } catch (_) { }
+                        // 进入 scrub 的第一下也立即对齐
+                        scrollToProgress(startX);
+                    }, HOLD_MS);
+                };
+
+                const onPointerMove = (e) => {
+                    if (activePointerId == null) return;
+                    if (e.pointerId !== activePointerId) return;
+
+                    const dx = e.clientX - startX;
+                    const dy = e.clientY - startY;
+                    if (!movedTooMuch && Math.hypot(dx, dy) > MOVE_CANCEL_PX) {
+                        movedTooMuch = true;
+                        // 还没进入 scrub，就取消长按触发
+                        if (!scrubbing) clearPressTimer();
+                    }
+
+                    if (!scrubbing) return;
+                    // scrub 模式下：阻止页面滚动手势
+                    e.preventDefault();
+                    scrollToProgress(e.clientX);
+                };
+
+                const endScrub = () => {
+                    clearPressTimer();
+                    activePointerId = null;
+                    scrubbing = false;
+                    movedTooMuch = false;
+                };
+
+                const onPointerUp = (e) => {
+                    if (activePointerId == null) return;
+                    if (e.pointerId !== activePointerId) return;
+                    if (scrubbing) e.preventDefault();
+                    endScrub();
+                };
+
+                const onPointerCancel = (e) => {
+                    if (activePointerId == null) return;
+                    if (e.pointerId !== activePointerId) return;
+                    endScrub();
+                };
+
+                bar.addEventListener('pointerdown', onPointerDown, { passive: true });
+                bar.addEventListener('pointermove', onPointerMove, { passive: false });
+                bar.addEventListener('pointerup', onPointerUp, { passive: false });
+                bar.addEventListener('pointercancel', onPointerCancel, { passive: true });
+            })();
 
             // 暴露给悬浮球调用
             window.__veMobileBar = {
@@ -1725,6 +1925,74 @@
 
         /* 折叠/展开：卡片与概念块（默认展开） */
         (function () {
+            const STORAGE_KEY = 've_fold_state_v1';
+            const foldState = (() => {
+                try {
+                    const raw = localStorage.getItem(STORAGE_KEY);
+                    if (!raw) return { cards: {}, concepts: {} };
+                    const parsed = JSON.parse(raw);
+                    if (!parsed || typeof parsed !== 'object') return { cards: {}, concepts: {} };
+                    return {
+                        cards: (parsed.cards && typeof parsed.cards === 'object') ? parsed.cards : {},
+                        concepts: (parsed.concepts && typeof parsed.concepts === 'object') ? parsed.concepts : {}
+                    };
+                } catch (_) {
+                    return { cards: {}, concepts: {} };
+                }
+            })();
+
+            let saveTimer = null;
+            const scheduleSaveFoldState = () => {
+                if (saveTimer) return;
+                saveTimer = window.setTimeout(() => {
+                    saveTimer = null;
+                    try {
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify(foldState));
+                    } catch (_) {
+                        // ignore
+                    }
+                }, 60);
+            };
+
+            const normalizeTextKey = (s) => String(s || '')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .slice(0, 80);
+
+            const ensureCardKey = (card, index, questionEl) => {
+                if (!card) return null;
+                const existing = card.getAttribute('data-ve-card-key');
+                if (existing) return existing;
+                const q = normalizeTextKey(questionEl ? questionEl.textContent : '');
+                const key = `card:${index}:${q}`;
+                card.setAttribute('data-ve-card-key', key);
+                return key;
+            };
+
+            const ensureConceptKey = (block, index, cardKey, nameEl) => {
+                if (!block) return null;
+                const existing = block.getAttribute('data-ve-concept-key');
+                if (existing) return existing;
+                const n = normalizeTextKey(nameEl ? nameEl.textContent : '');
+                const key = `concept:${cardKey || 'nocard'}:${index}:${n}`;
+                block.setAttribute('data-ve-concept-key', key);
+                return key;
+            };
+
+            const setBodyCollapsedInstant = (bodyEl, collapsed) => {
+                if (!bodyEl) return;
+                if (bodyEl.__veOnEnd) {
+                    bodyEl.removeEventListener('transitionend', bodyEl.__veOnEnd);
+                    bodyEl.__veOnEnd = null;
+                }
+                const prevTransition = bodyEl.style.transition;
+                bodyEl.style.transition = 'none';
+                bodyEl.style.maxHeight = collapsed ? '0px' : 'none';
+                bodyEl.style.opacity = collapsed ? '0' : '1';
+                void bodyEl.offsetHeight;
+                bodyEl.style.transition = prevTransition;
+            };
+
             function prepareCardBody(card) {
                 if (!card || card.querySelector(':scope > .card-body')) return;
 
@@ -1817,7 +2085,8 @@
             }
 
             // Card：点击题目(question)折叠/展开；折叠时强制折叠该卡片内所有 concept-block
-            document.querySelectorAll('.card').forEach((card) => {
+            const allCards = Array.from(document.querySelectorAll('.card'));
+            allCards.forEach((card, cardIndex) => {
                 const questionEl = card.querySelector('.card-header .question');
                 if (!questionEl) return;
 
@@ -1826,13 +2095,15 @@
                 prepareCardBody(card);
                 const cardBody = card.querySelector(':scope > .card-body');
 
+                const cardKey = ensureCardKey(card, cardIndex, questionEl);
+
                 questionEl.setAttribute('role', 'button');
                 questionEl.setAttribute('tabindex', '0');
                 questionEl.setAttribute('aria-expanded', 'true');
                 questionEl.title = '折叠/展开';
 
                 const collapseConceptBlocks = () => {
-                    card.querySelectorAll('.concept-block').forEach((block) => {
+                    card.querySelectorAll('.concept-block').forEach((block, conceptIndex) => {
                         prepareConceptBody(block);
                         if (!block.classList.contains('is-collapsed')) {
                             block.classList.add('is-collapsed');
@@ -1842,11 +2113,17 @@
 
                         const body = block.querySelector(':scope > .concept-body');
                         collapseBody(body);
+
+                        const conceptKey = ensureConceptKey(block, conceptIndex, cardKey, nameEl);
+                        if (conceptKey) {
+                            foldState.concepts[conceptKey] = true;
+                        }
                     });
+                    scheduleSaveFoldState();
                 };
 
                 const expandConceptBlocks = () => {
-                    card.querySelectorAll('.concept-block').forEach((block) => {
+                    card.querySelectorAll('.concept-block').forEach((block, conceptIndex) => {
                         prepareConceptBody(block);
 
                         if (block.classList.contains('is-collapsed')) {
@@ -1858,12 +2135,23 @@
 
                         const body = block.querySelector(':scope > .concept-body');
                         expandBody(body);
+
+                        const conceptKey = ensureConceptKey(block, conceptIndex, cardKey, nameEl);
+                        if (conceptKey) {
+                            foldState.concepts[conceptKey] = false;
+                        }
                     });
+                    scheduleSaveFoldState();
                 };
 
                 const toggleCard = () => {
                     const collapsed = card.classList.toggle('is-collapsed');
                     questionEl.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+
+                    if (cardKey) {
+                        foldState.cards[cardKey] = collapsed;
+                        scheduleSaveFoldState();
+                    }
 
                     // 题目折叠：概念块全部折叠
                     if (collapsed) {
@@ -1871,16 +2159,29 @@
                         collapseBody(cardBody);
                     } else {
                         expandBody(cardBody);
+                        // 展开题目时：展开其内所有概念块（并更新持久化）
                         expandConceptBlocks();
                     }
 
-                    // 题目展开：概念块不自动展开（保持原状态）
+                    // 题目展开：概念块全部展开（覆盖其原持久化状态）
 
                     // 折叠/展开会改变页面高度，刷新阅读进度条
                     if (typeof window.__veUpdateReadProgress === 'function') {
                         window.requestAnimationFrame(() => window.__veUpdateReadProgress());
                     }
                 };
+
+                // 恢复 card 折叠状态（加载时不走动画）
+                const shouldCollapseCard = Boolean(cardKey && foldState.cards[cardKey]);
+                if (shouldCollapseCard) {
+                    if (!card.classList.contains('is-collapsed')) card.classList.add('is-collapsed');
+                    questionEl.setAttribute('aria-expanded', 'false');
+                    setBodyCollapsedInstant(cardBody, true);
+                } else {
+                    if (card.classList.contains('is-collapsed')) card.classList.remove('is-collapsed');
+                    questionEl.setAttribute('aria-expanded', 'true');
+                    setBodyCollapsedInstant(cardBody, false);
+                }
 
                 // 点击标题所在行（包含空白区域）折叠/展开；点击 meta-tag 不触发
                 if (headerEl) {
@@ -1900,12 +2201,18 @@
             });
 
             // Concept-block：点击 concept-name 折叠其内部内容
-            document.querySelectorAll('.concept-block').forEach((block) => {
+            document.querySelectorAll('.concept-block').forEach((block, conceptIndex) => {
                 prepareConceptBody(block);
                 const nameEl = block.querySelector('.concept-name');
                 if (!nameEl) return;
 
                 const conceptBody = block.querySelector(':scope > .concept-body');
+
+                const parentCard = block.closest('.card');
+                const parentQuestionEl = parentCard ? parentCard.querySelector('.card-header .question') : null;
+                const parentCardIndex = parentCard ? allCards.indexOf(parentCard) : -1;
+                const parentCardKey = parentCard ? ensureCardKey(parentCard, parentCardIndex >= 0 ? parentCardIndex : 0, parentQuestionEl) : 'nocard';
+                const conceptKey = ensureConceptKey(block, conceptIndex, parentCardKey, nameEl);
 
                 nameEl.setAttribute('role', 'button');
                 nameEl.setAttribute('tabindex', '0');
@@ -1921,7 +2228,24 @@
                     } else {
                         expandBody(conceptBody);
                     }
+
+                    if (conceptKey) {
+                        foldState.concepts[conceptKey] = collapsed;
+                        scheduleSaveFoldState();
+                    }
                 };
+
+                // 恢复 concept-block 折叠状态（加载时不走动画）
+                const shouldCollapseConcept = Boolean(conceptKey && foldState.concepts[conceptKey]);
+                if (shouldCollapseConcept) {
+                    if (!block.classList.contains('is-collapsed')) block.classList.add('is-collapsed');
+                    nameEl.setAttribute('aria-expanded', 'false');
+                    setBodyCollapsedInstant(conceptBody, true);
+                } else {
+                    if (block.classList.contains('is-collapsed')) block.classList.remove('is-collapsed');
+                    nameEl.setAttribute('aria-expanded', 'true');
+                    setBodyCollapsedInstant(conceptBody, false);
+                }
 
                 nameEl.addEventListener('click', (e) => {
                     e.preventDefault();
@@ -1947,10 +2271,16 @@
                 const cardBody = card.querySelector(':scope > .card-body');
                 const questionEl = card.querySelector('.card-header .question');
 
+                const cardKey = card.getAttribute('data-ve-card-key');
+
                 if (!card.classList.contains('is-collapsed')) {
                     card.classList.add('is-collapsed');
                 }
                 if (questionEl) questionEl.setAttribute('aria-expanded', 'false');
+
+                if (cardKey) {
+                    foldState.cards[cardKey] = true;
+                }
 
                 // 规则：题目折叠 => 强制折叠卡片内所有 concept-block
                 card.querySelectorAll('.concept-block').forEach((block) => {
@@ -1964,9 +2294,15 @@
 
                     const body = block.querySelector(':scope > .concept-body');
                     collapseBody(body);
+
+                    const conceptKey = block.getAttribute('data-ve-concept-key');
+                    if (conceptKey) {
+                        foldState.concepts[conceptKey] = true;
+                    }
                 });
 
                 collapseBody(cardBody);
+                scheduleSaveFoldState();
             }
 
             function expandCardAll(card) {
@@ -1976,10 +2312,16 @@
                 const cardBody = card.querySelector(':scope > .card-body');
                 const questionEl = card.querySelector('.card-header .question');
 
+                const cardKey = card.getAttribute('data-ve-card-key');
+
                 if (card.classList.contains('is-collapsed')) {
                     card.classList.remove('is-collapsed');
                 }
                 if (questionEl) questionEl.setAttribute('aria-expanded', 'true');
+
+                if (cardKey) {
+                    foldState.cards[cardKey] = false;
+                }
 
                 expandBody(cardBody);
 
@@ -1995,7 +2337,14 @@
 
                     const body = block.querySelector(':scope > .concept-body');
                     expandBody(body);
+
+                    const conceptKey = block.getAttribute('data-ve-concept-key');
+                    if (conceptKey) {
+                        foldState.concepts[conceptKey] = false;
+                    }
                 });
+
+                scheduleSaveFoldState();
             }
 
             if (collapseAllBtn) {
@@ -2146,6 +2495,90 @@
             });
         })();
 
+        /* 深浅色切换（默认：跟随系统；用户手动切换后持久化） */
+        (function () {
+            const KEY = 've_theme_preference_v1';
+            const root = document.documentElement;
+            const btn = document.getElementById('toggleTheme');
+            if (!btn || !root) return;
+
+            const media = (window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null);
+
+            const normalize = (v) => (v === 'light' || v === 'dark' || v === 'auto') ? v : 'auto';
+            const readPref = () => {
+                try {
+                    return normalize(localStorage.getItem(KEY) || 'auto');
+                } catch (_) {
+                    return 'auto';
+                }
+            };
+            const writePref = (v) => {
+                try {
+                    localStorage.setItem(KEY, v);
+                } catch (_) { }
+            };
+
+            let pref = readPref();
+
+            const nextPref = (p) => {
+                if (p === 'auto') return 'dark';
+                if (p === 'dark') return 'light';
+                return 'auto';
+            };
+
+            const getEffective = () => {
+                if (pref === 'light' || pref === 'dark') return pref;
+                if (!media) return 'light';
+                return media.matches ? 'dark' : 'light';
+            };
+
+            const syncUI = () => {
+                const effective = getEffective();
+
+                if (pref === 'auto') {
+                    btn.textContent = '自';
+                    btn.title = '主题：跟随系统（点击切换为深色）';
+                } else if (pref === 'dark') {
+                    btn.textContent = '深';
+                    btn.title = '主题：深色（点击切换为浅色）';
+                } else {
+                    btn.textContent = '浅';
+                    btn.title = '主题：浅色（点击切换为跟随系统）';
+                }
+
+                // 维持原本 toggle 语义：当前生效主题为深色时按下
+                btn.setAttribute('aria-pressed', effective === 'dark' ? 'true' : 'false');
+            };
+
+            const apply = () => {
+                if (pref === 'light' || pref === 'dark') {
+                    root.setAttribute('data-theme', pref);
+                } else {
+                    root.removeAttribute('data-theme');
+                }
+                syncUI();
+            };
+
+            btn.addEventListener('click', () => {
+                pref = nextPref(pref);
+                writePref(pref);
+                apply();
+            });
+
+            if (media) {
+                const onChange = () => {
+                    if (pref === 'auto') syncUI();
+                };
+                if (typeof media.addEventListener === 'function') {
+                    media.addEventListener('change', onChange);
+                } else if (typeof media.addListener === 'function') {
+                    media.addListener(onChange);
+                }
+            }
+
+            apply();
+        })();
+
         /* 字体控制逻辑 */
         (function () {
             const htmlRoot = document.documentElement;
@@ -2153,18 +2586,44 @@
             const btnInc = document.getElementById('fontIncrease');
             const display = document.getElementById('fontDisplay');
 
+            const FONT_KEY = 've_font_size_v1';
+
             // 默认值与范围
             let currentSize = 15;
             const MIN_SIZE = 12;
             const MAX_SIZE = 22;
 
+            const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+
+            const readSavedSize = () => {
+                try {
+                    const raw = localStorage.getItem(FONT_KEY);
+                    if (raw == null) return null;
+                    const n = Number(raw);
+                    return Number.isFinite(n) ? Math.round(n) : null;
+                } catch (_) {
+                    return null;
+                }
+            };
+
+            const writeSavedSize = (size) => {
+                try {
+                    localStorage.setItem(FONT_KEY, String(size));
+                } catch (_) {
+                    // ignore
+                }
+            };
+
             function updateFont(size) {
+                const next = clamp(Math.round(size), MIN_SIZE, MAX_SIZE);
                 // 更新 CSS 变量
-                htmlRoot.style.setProperty('--base-font-size', size + 'px');
+                htmlRoot.style.setProperty('--base-font-size', next + 'px');
                 // 更新显示数字
-                display.textContent = size;
+                display.textContent = next;
                 // 更新状态
-                currentSize = size;
+                currentSize = next;
+
+                writeSavedSize(next);
 
                 // 字号变化会影响页面高度，顺便刷新阅读进度条
                 if (typeof window.__veUpdateReadProgress === 'function') {
@@ -2172,8 +2631,8 @@
                 }
 
                 // 按钮禁用状态逻辑（用 disabled 避免连点选中文字）
-                const decDisabled = size <= MIN_SIZE;
-                const incDisabled = size >= MAX_SIZE;
+                const decDisabled = next <= MIN_SIZE;
+                const incDisabled = next >= MAX_SIZE;
 
                 btnDec.disabled = decDisabled;
                 btnInc.disabled = incDisabled;
@@ -2198,12 +2657,68 @@
             display.title = "点击重置";
 
             // 初始化一次以设置按钮状态
+            const saved = readSavedSize();
+            if (saved != null) {
+                currentSize = clamp(saved, MIN_SIZE, MAX_SIZE);
+            }
             updateFont(currentSize);
         })();
 
         /* 悬浮条背景阅读进度条 */
         (function () {
             const root = document.documentElement;
+
+            // 避免浏览器自己的滚动恢复与我们的恢复逻辑互相打架
+            try {
+                if ('scrollRestoration' in history) {
+                    history.scrollRestoration = 'manual';
+                }
+            } catch (_) { }
+
+            const SCROLL_P_KEY = 've_scroll_p_v1';
+            const LEGACY_SCROLL_Y_KEY = 've_scroll_y_v1';
+            let scrollSaveTimer = null;
+
+            // 初始化恢复阶段：避免 scrollTo 触发的 update 覆盖本地存档
+            let restoring = true;
+
+            const readSavedScrollP = () => {
+                try {
+                    const raw = localStorage.getItem(SCROLL_P_KEY);
+                    if (raw == null) return null;
+                    const n = Number(raw);
+                    if (!Number.isFinite(n)) return null;
+                    return Math.min(1, Math.max(0, n));
+                } catch (_) {
+                    return null;
+                }
+            };
+
+            const readLegacyScrollY = () => {
+                try {
+                    const raw = localStorage.getItem(LEGACY_SCROLL_Y_KEY);
+                    if (raw == null) return null;
+                    const n = Number(raw);
+                    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
+                } catch (_) {
+                    return null;
+                }
+            };
+
+            const scheduleSaveScrollP = (p) => {
+                if (document.body && document.body.classList.contains('modal-open')) return;
+                if (restoring) return;
+                if (scrollSaveTimer) return;
+                scrollSaveTimer = window.setTimeout(() => {
+                    scrollSaveTimer = null;
+                    try {
+                        const v = Math.min(1, Math.max(0, Number(p) || 0));
+                        localStorage.setItem(SCROLL_P_KEY, String(Number(v.toFixed(6))));
+                    } catch (_) {
+                        // ignore
+                    }
+                }, 120);
+            };
 
             function clamp01(n) {
                 if (Number.isNaN(n)) return 0;
@@ -2218,6 +2733,8 @@
                 const denom = Math.max(1, scrollHeight - clientHeight);
                 const p = clamp01(scrollTop / denom);
                 root.style.setProperty('--read-progress', (p * 100).toFixed(2) + '%');
+
+                scheduleSaveScrollP(p);
             }
 
             // 暴露给其他逻辑（字号变化/折叠展开）调用
@@ -2227,8 +2744,78 @@
             window.addEventListener('resize', update);
             window.addEventListener('orientationchange', update);
 
-            // 初始渲染
-            update();
+            // 初始：尝试恢复滚动位置（阅读进度）
+            const restoreScroll = () => {
+                const docEl = document.documentElement;
+                const clientH = window.innerHeight || docEl.clientHeight || 0;
+                const denom = Math.max(1, (docEl.scrollHeight || 0) - clientH);
+
+                const savedP = readSavedScrollP();
+                if (savedP != null) {
+                    const y = Math.max(0, Math.min(Math.round(savedP * denom), denom));
+                    window.scrollTo(0, y);
+                    update();
+                    return;
+                }
+
+                // 兼容旧版本：如果只有 scrollY，则换算为 p 并写入新 key
+                const legacyY = readLegacyScrollY();
+                if (legacyY != null) {
+                    const y = Math.max(0, Math.min(legacyY, denom));
+                    const p = clamp01(y / denom);
+                    window.scrollTo(0, y);
+                    try {
+                        localStorage.setItem(SCROLL_P_KEY, String(Number(p.toFixed(6))));
+                    } catch (_) { }
+                    update();
+                    return;
+                }
+
+                update();
+            };
+
+            const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+            const waitFonts = async () => {
+                try {
+                    if (!document.fonts || !document.fonts.ready) return;
+                    // 最多等 350ms，避免网络字体慢导致卡太久
+                    await Promise.race([document.fonts.ready, sleep(350)]);
+                } catch (_) { }
+            };
+
+            const waitImages = async () => {
+                try {
+                    const imgs = Array.from(document.images || []);
+                    if (!imgs.length) return;
+                    const pending = imgs.filter((img) => !img.complete);
+                    if (!pending.length) return;
+                    // 最多等 450ms，避免大图加载慢导致卡太久
+                    await Promise.race([
+                        Promise.all(pending.map((img) => new Promise((resolve) => {
+                            const done = () => resolve();
+                            img.addEventListener('load', done, { once: true });
+                            img.addEventListener('error', done, { once: true });
+                        }))),
+                        sleep(450)
+                    ]);
+                } catch (_) { }
+            };
+
+            // 等两帧，确保折叠状态/字号变化都已影响布局
+            window.requestAnimationFrame(() => {
+                window.requestAnimationFrame(async () => {
+                    await waitFonts();
+                    await waitImages();
+                    // 再等一帧，让布局彻底稳定
+                    window.requestAnimationFrame(() => {
+                        restoreScroll();
+                        restoring = false;
+                    });
+                });
+            });
+
+            // 注意：restoring=false 已挪到 restoreScroll 执行后
         })();
     </script>
 </body>
