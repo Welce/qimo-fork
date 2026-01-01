@@ -903,6 +903,10 @@
                 box-shadow: none;
                 backdrop-filter: none;
                 -webkit-backdrop-filter: none;
+
+                /* 浅色模式下隐藏态进度条更显眼（仅影响该元素范围内的渐变叠加强度） */
+                --bar-progress-strength: 22%;
+                --bar-progress-fallback-alpha: 0.14;
             }
 
             .control-bar.is-hidden>* {
