@@ -980,8 +980,8 @@
             .control-bar.is-hidden {
                 opacity: 1;
                 transform: none;
-                /* 允许在“进度条态”长按拖动调节阅读进度 */
-                pointer-events: auto;
+                /* 隐藏态不可交互（不支持拖动调节进度） */
+                pointer-events: none;
                 padding: 0;
                 height: 6px;
                 max-height: 6px;
@@ -1238,13 +1238,17 @@
             /* 移动端：长按底栏并左右拖动，调节阅读进度 */
             (function setupBarScrub() {
                 const HOLD_MS = 240;
-                const MOVE_CANCEL_PX = 10;
+                // 仅在“明显纵向滑动（更像滚动）”时才取消长按进入 scrub
+                const V_CANCEL_PX = 14;
 
                 let pressTimer = null;
                 let activePointerId = null;
                 let scrubbing = false;
+                let suppressClick = false;
                 let startX = 0;
                 let startY = 0;
+                let lastX = 0;
+                let lastY = 0;
                 let movedTooMuch = false;
 
                 const clearPressTimer = () => {
@@ -1254,11 +1258,7 @@
 
                 const clamp01 = (n) => Math.min(1, Math.max(0, n));
 
-                const isBlockedTarget = (target) => {
-                    if (!target || !target.closest) return false;
-                    // 不抢按钮/字号显示的交互
-                    return Boolean(target.closest('.control-btn, #fontDisplay'));
-                };
+                // 需求：在 .control-btn / #fontDisplay 上长按也要触发拖动
 
                 const scrollToProgress = (clientX) => {
                     const rect = bar.getBoundingClientRect();
@@ -1280,26 +1280,30 @@
                 const onPointerDown = (e) => {
                     if (!mq.matches) return;
                     if (typeof isOpen === 'function' && isOpen()) return;
+                    // 隐藏态不可用
+                    if (bar.classList.contains('is-hidden')) return;
                     if (!e || e.pointerId == null) return;
                     if (activePointerId != null) return;
-                    if (isBlockedTarget(e.target)) return;
 
                     activePointerId = e.pointerId;
                     scrubbing = false;
                     movedTooMuch = false;
                     startX = e.clientX;
                     startY = e.clientY;
+                    lastX = e.clientX;
+                    lastY = e.clientY;
 
                     clearPressTimer();
                     pressTimer = window.setTimeout(() => {
                         // 如果用户在长按期间明显滑动了，就不进入 scrub（避免影响正常滚动）
                         if (movedTooMuch) return;
                         scrubbing = true;
+                        suppressClick = true;
                         try {
                             bar.setPointerCapture(activePointerId);
                         } catch (_) { }
                         // 进入 scrub 的第一下也立即对齐
-                        scrollToProgress(startX);
+                        scrollToProgress(lastX);
                     }, HOLD_MS);
                 };
 
@@ -1307,12 +1311,21 @@
                     if (activePointerId == null) return;
                     if (e.pointerId !== activePointerId) return;
 
+                    lastX = e.clientX;
+                    lastY = e.clientY;
+
                     const dx = e.clientX - startX;
                     const dy = e.clientY - startY;
-                    if (!movedTooMuch && Math.hypot(dx, dy) > MOVE_CANCEL_PX) {
-                        movedTooMuch = true;
-                        // 还没进入 scrub，就取消长按触发
-                        if (!scrubbing) clearPressTimer();
+
+                    // 还没进入 scrub：允许小范围移动；只有明显“纵向为主”的滑动才取消
+                    if (!scrubbing && !movedTooMuch) {
+                        const absDx = Math.abs(dx);
+                        const absDy = Math.abs(dy);
+                        const verticalDominant = absDy > absDx * 1.25;
+                        if (verticalDominant && absDy > V_CANCEL_PX) {
+                            movedTooMuch = true;
+                            clearPressTimer();
+                        }
                     }
 
                     if (!scrubbing) return;
@@ -1345,6 +1358,15 @@
                 bar.addEventListener('pointermove', onPointerMove, { passive: false });
                 bar.addEventListener('pointerup', onPointerUp, { passive: false });
                 bar.addEventListener('pointercancel', onPointerCancel, { passive: true });
+
+                // scrub 触发后，抑制一次 click，避免长按松手误点到底栏按钮
+                bar.addEventListener('click', (e) => {
+                    if (!suppressClick) return;
+                    suppressClick = false;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+                }, true);
             })();
 
             // 暴露给悬浮球调用
